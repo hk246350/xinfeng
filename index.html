@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>信封与星星弹窗</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            cursor: pointer;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        /* 初始提示 */
+        .start-hint {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: "Comic Sans MS", "Marker Felt", sans-serif;
+            font-size: clamp(18px, 4vw, 32px);
+            color: #e2e8f0;
+            padding: clamp(15px, 3vw, 25px) clamp(25px, 5vw, 50px);
+            background: rgba(30, 41, 59, 0.85);
+            border-radius: 50px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            transition: all 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+            z-index: 100;
+            text-align: center;
+            user-select: none;
+        }
+
+        .start-hint.hidden {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.8);
+            pointer-events: none;
+        }
+
+        /* 星星弹窗 */
+        .star {
+            position: fixed;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-family: "Arial Rounded MT Bold", sans-serif;
+            font-size: clamp(12px, 2vw, 18px);
+            border-radius: 50%;
+            z-index: 10;
+            cursor: grab;
+            transition: all 0.5s ease;
+            animation: starPulse 3s infinite alternate;
+            user-select: none;
+        }
+
+        @keyframes starPulse {
+            from { 
+                box-shadow: 0 0 10px rgba(255, 215, 0, 0.7), 
+                            0 0 20px rgba(255, 215, 0, 0.5); 
+            }
+            to { 
+                box-shadow: 0 0 20px rgba(255, 215, 0, 0.9), 
+                            0 0 35px rgba(255, 215, 0, 0.7); 
+            }
+        }
+
+        /* 信封弹窗 */
+        .envelope {
+            position: fixed;
+            width: clamp(160px, 14vw, 220px);
+            height: clamp(120px, 11vw, 160px);
+            z-index: 10;
+            cursor: grab;
+            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            user-select: none;
+        }
+
+        .envelope-body {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #e11d48;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .envelope-flap {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #be123c;
+            transform-origin: top;
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            clip-path: polygon(0 0, 100% 0, 50% 100%);
+        }
+
+        .envelope-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 90%;
+            height: 80%;
+            padding: 12px;
+            background: #fff;
+            border-radius: 6px;
+            transform: translate(-50%, -40%);
+            transition: transform 0.5s ease 0.15s, opacity 0.5s ease 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Georgia", serif;
+            font-size: clamp(12px, 1.5vw, 16px);
+            color: #333;
+            opacity: 0;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .envelope.open .envelope-flap {
+            transform: rotateX(180deg);
+        }
+
+        .envelope.open .envelope-content {
+            transform: translate(-50%, -60%);
+            opacity: 1;
+        }
+
+        /* 粒子容器 */
+        #particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        /* 音频隐藏 */
+        audio {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="start-hint">点击开始</div>
+    <div id="particles"></div>
+    
+    <audio id="bgm" loop preload="auto">
+        <source src="bgm.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        class PopupApp {
+            constructor() {
+                // 单独维护信封列表（用于碰撞检测）
+                this.envelopes = [];
+                
+                // 配置参数
+                this.config = {
+                    total: window.innerWidth < 768 ? 30 : 45, // 总弹窗数（响应式）
+                    interval: window.innerWidth < 768 ? 300 : 200, // 创建间隔
+                    starSizes: window.innerWidth < 768 ? [40, 80] : [60, 120], // 星星尺寸范围
+                    envelopeMinDistance: window.innerWidth < 768 ? 30 : 40, // 信封最小间距
+                    starMinDistance: window.innerWidth < 768 ? 20 : 30, // 星星最小间距
+                    envelopeTexts: [
+                        '一封来自星空的信 ✨',
+                        '愿你被世界温柔以待 💕',
+                        '今日份好运请查收 📮',
+                        '秘密藏在风里 🍃',
+                        '拆开有惊喜哦 ~',
+                        '你值得所有美好 🌈',
+                        '星光不负赶路人 🌟',
+                        '平安喜乐，万事胜意 🎐',
+                        '藏了一句喜欢你 💌',
+                        '抬头遇见温柔 🌙',
+                        '生活有点甜 🍬',
+                        '好运正在加载中 🚀',
+                        '今天也要元气满满 ✨',
+                        '你笑起来真好看 😊',
+                        '慢慢走，别着急 🌸'
+                    ],
+                    starTexts: [
+                        '你比星光璀璨 ✨',
+                        '摘颗星星送给你 🌟',
+                        '宇宙偏爱你 🌌',
+                        '今夜月色真美 🌙',
+                        '保持闪耀呀 ✨',
+                        '今天也很棒哦 👍',
+                        '星星为你眨眼 🌟',
+                        '别辜负好时光 ⏳'
+                    ]
+                };
+
+                // 状态管理
+                this.state = {
+                    started: false,
+                    count: 0,
+                    items: [],
+                    availableEnvelopeTexts: [...this.config.envelopeTexts],
+                    isDragging: false,
+                    dragTarget: null,
+                    dragOffset: { x: 0, y: 0 }
+                };
+
+                // DOM元素
+                this.elements = {
+                    hint: document.querySelector('.start-hint'),
+                    particles: document.getElementById('particles'),
+                    bgm: document.getElementById('bgm'),
+                    body: document.body
+                };
+
+                // 绑定事件
+                this.bindEvents();
+            }
+
+            // 绑定所有交互事件
+            bindEvents() {
+                // 初始点击/触摸开始
+                this.elements.body.addEventListener('click', () => this.start(), { once: true });
+                this.elements.body.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.start();
+                }, { once: true, passive: false });
+
+                // 拖动事件（鼠标+触摸）
+                this.elements.body.addEventListener('mousemove', (e) => this.handleDrag(e.clientX, e.clientY));
+                this.elements.body.addEventListener('touchmove', (e) => {
+                    if (this.state.isDragging && e.touches.length > 0) {
+                        const touch = e.touches[0];
+                        this.handleDrag(touch.clientX, touch.clientY);
+                    }
+                }, { passive: false });
+
+                // 结束拖动
+                this.elements.body.addEventListener('mouseup', () => this.endDrag());
+                this.elements.body.addEventListener('touchend', () => this.endDrag());
+            }
+
+            // 启动应用
+            start() {
+                if (this.state.started) return;
+                this.state.started = true;
+
+                // 隐藏初始提示
+                this.elements.hint.classList.add('hidden');
+                
+                // 播放背景音乐
+                this.elements.bgm.play().catch(err => console.log('音乐播放失败:', err));
+
+                // 开始创建弹窗
+                this.createNextPopup();
+            }
+
+            // 递归创建下一个弹窗
+            createNextPopup() {
+                if (this.state.count >= this.config.total) return;
+
+                // 按1:2比例创建信封和星星
+                if (this.state.count % 3 === 0 && this.state.availableEnvelopeTexts.length > 0) {
+                    this.createEnvelope();
+                } else {
+                    this.createStar();
+                }
+
+                this.state.count++;
+                setTimeout(() => this.createNextPopup(), this.config.interval);
+            }
+
+            // 获取元素矩形信息
+            getItemRect(item) {
+                const rect = item.getBoundingClientRect();
+                return {
+                    x: rect.left,
+                    y: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    centerX: rect.left + rect.width / 2,
+                    centerY: rect.top + rect.height / 2
+                };
+            }
+
+            // 获取安全位置（全屏随机分布）
+            getSafePosition(width, height, type) {
+                // 确保元素完全在窗口内
+                const maxX = window.innerWidth - width;
+                const maxY = window.innerHeight - height;
+                const minX = 0;
+                const minY = 0;
+
+                let x, y;
+                let attempts = 0;
+                const maxAttempts = type === 'envelope' ? 30 : 15;
+
+                // 初始全屏随机位置
+                x = Math.random() * (maxX - minX) + minX;
+                y = Math.random() * (maxY - minY) + minY;
+
+                // 碰撞检测循环
+                do {
+                    if (attempts > 0) {
+                        x = Math.random() * (maxX - minX) + minX;
+                        y = Math.random() * (maxY - minY) + minY;
+                    }
+                    attempts++;
+                } while (
+                    attempts < maxAttempts && 
+                    this.isColliding({ x, y, width, height, type })
+                );
+
+                return { x, y };
+            }
+
+            // 碰撞检测
+            isColliding(newItem) {
+                const checkList = newItem.type === 'envelope' 
+                    ? this.envelopes 
+                    : this.state.items.map(item => item.element);
+                
+                return checkList.some(item => {
+                    const rectA = {
+                        centerX: newItem.x + newItem.width / 2,
+                        centerY: newItem.y + newItem.height / 2,
+                        width: newItem.width
+                    };
+                    const rectB = this.getItemRect(item);
+                    
+                    const centerDist = Math.hypot(
+                        rectA.centerX - rectB.centerX,
+                        rectA.centerY - rectB.centerY
+                    );
+                    
+                    const minSafeDist = newItem.type === 'envelope' 
+                        ? (rectA.width + rectB.width) / 2 + this.config.envelopeMinDistance 
+                        : (rectA.width + rectB.width) / 4 + this.config.starMinDistance;
+                    
+                    return centerDist < minSafeDist;
+                });
+            }
+
+            // 创建星星
+            createStar() {
+                const [min, max] = this.config.starSizes;
+                const size = Math.floor(Math.random() * (max - min)) + min;
+                
+                const star = document.createElement('div');
+                star.className = 'star';
+                star.style.width = `${size}px`;
+                star.style.height = `${size}px`;
+                star.style.backgroundColor = `rgba(255, 215, 0, ${0.7 + Math.random() * 0.3})`;
+
+                const pos = this.getSafePosition(size, size, 'star');
+                star.style.left = `${pos.x}px`;
+                star.style.top = `${pos.y}px`;
+
+                const text = this.config.starTexts[Math.floor(Math.random() * this.config.starTexts.length)];
+                star.innerHTML = `<span>${text}</span>`;
+
+                // 入场动画
+                star.style.opacity = '0';
+                star.style.transform = 'scale(0)';
+                this.elements.body.appendChild(star);
+                
+                setTimeout(() => {
+                    star.style.opacity = '1';
+                    star.style.transform = 'scale(1)';
+                    this.animateText(star.querySelector('span'));
+                }, 50);
+
+                this.bindDrag(star, 'star');
+                this.state.items.push({ element: star, type: 'star' });
+            }
+
+            // 创建信封
+            createEnvelope() {
+                const envelope = document.createElement('div');
+                envelope.className = 'envelope';
+                
+                // 临时添加获取尺寸
+                this.elements.body.appendChild(envelope);
+                const rect = envelope.getBoundingClientRect();
+                const width = rect.width;
+                const height = rect.height;
+                this.elements.body.removeChild(envelope);
+
+                const pos = this.getSafePosition(width, height, 'envelope');
+                envelope.style.left = `${pos.x}px`;
+                envelope.style.top = `${pos.y}px`;
+
+                // 随机不重复文本
+                const textIdx = Math.floor(Math.random() * this.state.availableEnvelopeTexts.length);
+                const text = this.state.availableEnvelopeTexts[textIdx];
+                this.state.availableEnvelopeTexts.splice(textIdx, 1);
+
+                envelope.innerHTML = `
+                    <div class="envelope-body">
+                        <div class="envelope-flap"></div>
+                        <div class="envelope-content">${text}</div>
+                    </div>
+                `;
+
+                // 入场动画
+                envelope.style.opacity = '0';
+                envelope.style.transform = 'translateY(30px) scale(0.95)';
+                this.elements.body.appendChild(envelope);
+                
+                setTimeout(() => {
+                    envelope.style.opacity = '1';
+                    envelope.style.transform = 'translateY(0) scale(1)';
+                }, 50);
+
+                // 点击开合事件
+                envelope.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    envelope.classList.toggle('open');
+                    if (envelope.classList.contains('open')) {
+                        const rect = envelope.getBoundingClientRect();
+                        this.createParticles(rect.left + rect.width/2, rect.top + rect.height/2);
+                    }
+                });
+
+                this.bindDrag(envelope, 'envelope');
+                this.envelopes.push(envelope);
+                this.state.items.push({ element: envelope, type: 'envelope' });
+            }
+
+            // 绑定拖动
+            bindDrag(element, type) {
+                element.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    this.startDrag(e.clientX, e.clientY, element);
+                });
+
+                element.addEventListener('touchstart', (e) => {
+                    e.stopPropagation();
+                    if (e.touches.length > 0) {
+                        const touch = e.touches[0];
+                        this.startDrag(touch.clientX, touch.clientY, element);
+                    }
+                });
+            }
+
+            // 开始拖动
+            startDrag(clientX, clientY, element) {
+                this.state.isDragging = true;
+                this.state.dragTarget = element;
+                
+                const rect = element.getBoundingClientRect();
+                this.state.dragOffset.x = clientX - rect.left;
+                this.state.dragOffset.y = clientY - rect.top;
+                
+                element.style.zIndex = '100';
+                element.style.cursor = 'grabbing';
+            }
+
+            // 处理拖动
+            handleDrag(clientX, clientY) {
+                if (!this.state.isDragging || !this.state.dragTarget) return;
+
+                const target = this.state.dragTarget;
+                const rect = target.getBoundingClientRect();
+                
+                // 限制在窗口内
+                const maxX = window.innerWidth - rect.width;
+                const maxY = window.innerHeight - rect.height;
+                let newX = clientX - this.state.dragOffset.x;
+                let newY = clientY - this.state.dragOffset.y;
+                
+                newX = Math.max(0, Math.min(newX, maxX));
+                newY = Math.max(0, Math.min(newY, maxY));
+                
+                target.style.left = `${newX}px`;
+                target.style.top = `${newY}px`;
+            }
+
+            // 结束拖动
+            endDrag() {
+                if (this.state.isDragging && this.state.dragTarget) {
+                    this.state.dragTarget.style.cursor = 'grab';
+                }
+                this.state.isDragging = false;
+                this.state.dragTarget = null;
+            }
+
+            // 文字逐字动画
+            animateText(element) {
+                const text = element.textContent;
+                element.textContent = '';
+                let index = 0;
+                
+                const interval = setInterval(() => {
+                    if (index < text.length) {
+                        element.textContent += text[index];
+                        index++;
+                    } else {
+                        clearInterval(interval);
+                    }
+                }, 100);
+            }
+
+            // 创建粒子效果
+            createParticles(x, y) {
+                const count = 25;
+                for (let i = 0; i < count; i++) {
+                    const particle = document.createElement('div');
+                    
+                    const size = Math.random() * 6 + 2;
+                    const color = i % 4 === 0 ? '#ffffff' : '#ffd700';
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 4 + 1;
+                    const lifetime = Math.random() * 800 + 600;
+                    
+                    particle.style.cssText = `
+                        position: absolute;
+                        width: ${size}px;
+                        height: ${size}px;
+                        background: ${color};
+                        border-radius: 50%;
+                        left: ${x}px;
+                        top: ${y}px;
+                        opacity: 0.9;
+                        transform: translate(-50%, -50%);
+                        pointer-events: none;
+                    `;
+                    
+                    this.elements.particles.appendChild(particle);
+                    
+                    const start = Date.now();
+                    const animate = () => {
+                        const elapsed = Date.now() - start;
+                        if (elapsed > lifetime) {
+                            particle.remove();
+                            return;
+                        }
+                        
+                        const progress = elapsed / lifetime;
+                        const distance = speed * (elapsed / 15);
+                        const newX = x + Math.cos(angle) * distance;
+                        const newY = y + Math.sin(angle) * distance;
+                        
+                        particle.style.left = `${newX}px`;
+                        particle.style.top = `${newY}px`;
+                        particle.style.opacity = (1 - progress).toString();
+                        
+                        requestAnimationFrame(animate);
+                    };
+                    
+                    requestAnimationFrame(animate);
+                }
+            }
+        }
+
+        // 初始化应用
+        window.addEventListener('DOMContentLoaded', () => {
+            new PopupApp();
+        });
+    </script>
+</body>
+</html>
